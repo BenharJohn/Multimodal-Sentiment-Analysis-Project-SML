@@ -1,0 +1,78 @@
+# CDAN Model Configuration for MVSA Sentiment Analysis
+
+# Experiment
+experiment_name: cdan_mvsa
+seed: 42
+
+# Data
+dataset_type: single  # 'single' or 'multiple'
+data_dir: data/processed
+image_dir: data/raw/images
+train_file: null  # Will use data_dir/train.csv if null
+val_file: null    # Will use data_dir/val.csv if null
+test_file: null   # Will use data_dir/test.csv if null
+val_split: 0.1    # Used if val_file is null
+test_split: 0.1   # Used if test_file is null
+
+# Model Architecture
+clip_model_name: openai/clip-vit-base-patch32
+num_classes: 3
+freeze_clip: true
+
+# Cross-Attention
+cross_attn_layers: 2
+cross_attn_heads: 8
+cross_attn_dropout: 0.1
+pool_method: mean  # 'mean', 'max', or 'cls'
+
+# Gating
+use_gating: true
+gate_type: simple  # 'simple', 'attention', or 'hierarchical'
+gate_activation: sigmoid  # 'sigmoid', 'softmax', or 'tanh'
+
+# Auxiliary Decoder
+use_aux_decoder: true
+aux_loss_weight: 0.05
+aux_loss_type: cosine  # 'cosine', 'l2', 'l1', or 'smooth_l1'
+aux_num_layers: 2
+
+# Classifier
+classifier_hidden_dims: [512, 256]
+classifier_dropout: 0.3
+
+# Training
+epochs: 30
+batch_size: 32
+num_workers: 4
+pin_memory: true
+
+# Optimization
+lr: 0.001  # Learning rate for head/fusion layers
+clip_lr: 0.00001  # Learning rate for CLIP encoders
+weight_decay: 0.01
+optimizer: adamw  # 'adam', 'adamw', or 'sgd'
+scheduler: cosine  # 'cosine', 'plateau', or 'step'
+gradient_clip: 1.0
+
+# CLIP Freezing Schedule
+freeze_epochs: 3  # Freeze CLIP for first N epochs
+warmup_epochs: 2  # Warmup learning rate for first N epochs
+
+# Regularization
+label_smoothing: 0.0  # Label smoothing (0.0 = disabled)
+use_soft_labels: false  # For MVSA-Multiple
+augment_train: false  # Data augmentation
+
+# Checkpointing
+checkpoint_dir: checkpoints
+save_freq: 5  # Save checkpoint every N epochs
+resume: null  # Path to checkpoint to resume from
+
+# Logging
+log_dir: logs
+
+# Device
+device: cuda  # 'cuda' or 'cpu'
+
+# Text Processing
+max_text_length: 77  # CLIP default
