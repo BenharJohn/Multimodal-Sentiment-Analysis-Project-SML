@@ -1,0 +1,230 @@
+# 🔌 Offline Setup Guide for CDAN Training
+
+This guide helps you run the CDAN model in environments **without internet access**.
+
+---
+
+## 📊 **Understanding the Model Size**
+
+From HuggingFace: `openai/clip-vit-base-patch32` total: **1.82 GB**
+
+**Breakdown:**
+- `pytorch_model.bin`: **605 MB** ← We only need this!
+- `tf_model.h5`: 606 MB (TensorFlow - not needed)
+- `flax_model.msgpack`: 605 MB (Flax/JAX - not needed)
+- Config files: ~5 MB
+
+**For PyTorch training, you only need ~610 MB total.**
+
+---
+
+## 🎯 **Option 1: Download in Code (RECOMMENDED)**
+
+If you have internet in your training environment:
+
+```bash
+# The model auto-downloads on first use
+python src/train.py --epochs 30 --batch-size 32
+
+# Downloads to: ~/.cache/huggingface/hub/
+# Only happens ONCE, then cached forever
+```
+
+**That's it!** No manual steps needed.
+
+---
+
+## 🎯 **Option 2: Pre-Download for Offline Use**
+
+If you need to prepare offline:
+
+### **A. Using Python (Easiest)**
+
+```bash
+# On a machine with internet:
+python scripts/download_clip_model.py
+
+# This caches to: ~/.cache/huggingface/
+# Then copy the cache folder to your offline machine
+```
+
+### **B. Manual Download (Full Control)**
+
+**Step 1:** Run on machine with internet:
+
+```bash
+bash scripts/download_clip_manual.sh
+```
+
+This downloads 8 files (~610 MB total) to `clip-vit-base-patch32/` folder.
+
+**Step 2:** Transfer files to offline machine and place in:
+
+```
+~/.cache/huggingface/hub/models--openai--clip-vit-base-patch32/snapshots/XXX/
+```
+
+Where `XXX` is any snapshot ID (or use in code directly).
+
+---
+
+## 📁 **Cache Directory Structure**
+
+HuggingFace caches models here:
+
+```
+~/.cache/huggingface/hub/
+└── models--openai--clip-vit-base-patch32/
+    ├── refs/
+    │   └── main
+    └── snapshots/
+        └── <commit-hash>/
+            ├── config.json
+            ├── pytorch_model.bin        # ← 605 MB
+            ├── preprocessor_config.json
+            ├── tokenizer.json
+            ├── tokenizer_config.json
+            ├── vocab.json
+            ├── merges.txt
+            └── special_tokens_map.json
+```
+
+---
+
+## 🔧 **Alternative: Use Local Model Path**
+
+Download files, then modify `src/models/clip_text.py` and `clip_image.py`:
+
+```python
+# Instead of:
+model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+
+# Use:
+model = CLIPModel.from_pretrained("./path/to/clip-vit-base-patch32")
+```
+
+---
+
+## 📥 **Direct Download Links** (if scripts fail)
+
+Download individual files from HuggingFace:
+
+**Required Files:**
+1. **config.json** (4 KB)
+   - https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/config.json
+
+2. **pytorch_model.bin** (605 MB) ← MAIN MODEL
+   - https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/pytorch_model.bin
+
+3. **preprocessor_config.json** (316 B)
+   - https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/preprocessor_config.json
+
+4. **tokenizer.json** (2.2 MB)
+   - https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/tokenizer.json
+
+5. **tokenizer_config.json** (592 B)
+   - https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/tokenizer_config.json
+
+6. **vocab.json** (862 KB)
+   - https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/vocab.json
+
+7. **merges.txt** (525 KB)
+   - https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/merges.txt
+
+8. **special_tokens_map.json** (389 B)
+   - https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/special_tokens_map.json
+
+**Total: ~610 MB**
+
+---
+
+## ⚡ **Quick Commands**
+
+### **Download with wget:**
+```bash
+wget https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/pytorch_model.bin
+wget https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/config.json
+# ... (repeat for all 8 files)
+```
+
+### **Download with curl:**
+```bash
+curl -L -O https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/pytorch_model.bin
+curl -L -O https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/config.json
+# ... (repeat for all 8 files)
+```
+
+### **Download all at once:**
+```bash
+bash scripts/download_clip_manual.sh
+```
+
+---
+
+## ✅ **Verify Download**
+
+After downloading, test:
+
+```python
+from transformers import CLIPModel
+
+# Test loading
+model = CLIPModel.from_pretrained("./clip-vit-base-patch32")
+print("✅ Model loaded successfully!")
+print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}")
+```
+
+Should output: `Parameters: 151,277,313` (151M parameters)
+
+---
+
+## 🚀 **Then Train Normally**
+
+Once model is cached/downloaded:
+
+```bash
+# Quick test (2 epochs, dummy data)
+python src/train.py --epochs 2 --batch-size 4 --device cpu
+
+# Full training (real MVSA data)
+bash scripts/train_cdan.sh --epochs 30
+```
+
+---
+
+## 🔍 **Troubleshooting**
+
+### **Issue: "Can't load model"**
+**Solution:**
+- Check cache directory exists
+- Verify all 8 files are present
+- Check file permissions
+
+### **Issue: "OSError: Can't load image processor"**
+**Solution:**
+- Ensure `preprocessor_config.json` is in the same folder
+- Try: `export TRANSFORMERS_CACHE=/path/to/cache`
+
+### **Issue: Model too large**
+**Solution:**
+- You only need PyTorch version (~610 MB)
+- Skip TensorFlow/Flax files (saves 1.2 GB)
+
+---
+
+## 📝 **Summary**
+
+| Method | Pros | Cons |
+|--------|------|------|
+| **Auto-download** | Easiest, one command | Needs internet during training |
+| **Pre-download script** | Automated, cacheable | Requires internet once |
+| **Manual download** | Full control, verifiable | More steps |
+
+**Recommendation:** Use auto-download if you have internet. Otherwise, use the manual script once and cache.
+
+---
+
+*See also:*
+- `scripts/download_clip_model.py` - Automated download
+- `scripts/download_clip_manual.sh` - Manual download script
+- HuggingFace docs: https://huggingface.co/docs/transformers/installation#offline-mode
