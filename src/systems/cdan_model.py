@@ -109,10 +109,21 @@ class CDANModel(nn.Module):
         self.image_hidden_dim = self.image_encoder.hidden_dim
         self.projection_dim = self.text_encoder.projection_dim
 
-        # Ensure dimensions match for cross-attention
-        assert self.text_hidden_dim == self.image_hidden_dim, \
-            "Text and image hidden dimensions must match for cross-attention"
-        self.hidden_dim = self.text_hidden_dim
+        # Use projection_dim as common dimension for cross-attention
+        # CLIP text and vision have different hidden dims (512 vs 768)
+        # but both project to the same projection_dim (512)
+        self.hidden_dim = self.projection_dim
+
+        # Add projection layers to align dimensions if needed
+        if self.text_hidden_dim != self.hidden_dim:
+            self.text_projection_layer = nn.Linear(self.text_hidden_dim, self.hidden_dim)
+        else:
+            self.text_projection_layer = nn.Identity()
+
+        if self.image_hidden_dim != self.hidden_dim:
+            self.image_projection_layer = nn.Linear(self.image_hidden_dim, self.hidden_dim)
+        else:
+            self.image_projection_layer = nn.Identity()
 
         # Cross-Attention Fusion
         self.cross_attention = BidirectionalCrossAttention(
@@ -225,15 +236,19 @@ class CDANModel(nn.Module):
         )
 
         # Get token-level and pooled features
-        text_tokens = text_outputs['text_tokens']          # [B, T, D]
+        text_tokens = text_outputs['text_tokens']          # [B, T, text_hidden_dim]
         text_pooled = text_outputs['text_pooled']          # [B, projection_dim]
-        vision_patches = image_outputs['vision_patches']   # [B, P, D]
+        vision_patches = image_outputs['vision_patches']   # [B, P, image_hidden_dim]
         vision_pooled = image_outputs['vision_pooled']     # [B, projection_dim]
+
+        # Project tokens to common dimension for cross-attention
+        text_tokens_proj = self.text_projection_layer(text_tokens)       # [B, T, hidden_dim]
+        vision_patches_proj = self.image_projection_layer(vision_patches) # [B, P, hidden_dim]
 
         # Cross-attention fusion
         cross_attn_output = self.cross_attention(
-            text_tokens=text_tokens,
-            vision_patches=vision_patches,
+            text_tokens=text_tokens_proj,
+            vision_patches=vision_patches_proj,
             text_mask=attention_mask,
             return_attention=return_attention
         )
