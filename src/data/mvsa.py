@@ -174,6 +174,9 @@ class MVSASingleDataset(MVSADataset):
     """
 
     def __init__(self, *args, **kwargs):
+        # Remove use_soft_labels if present (only applies to MVSA-Multiple)
+        kwargs.pop('use_soft_labels', None)
+
         # Default label mapping for MVSA-Single
         if 'label_map' not in kwargs:
             kwargs['label_map'] = {
