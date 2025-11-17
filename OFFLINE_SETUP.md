@@ -72,6 +72,7 @@ Where `XXX` is any snapshot ID (or use in code directly).
 
 HuggingFace caches models here:
 
+**Linux/Mac:**
 ```
 ~/.cache/huggingface/hub/
 └── models--openai--clip-vit-base-patch32/
@@ -87,6 +88,27 @@ HuggingFace caches models here:
             ├── vocab.json
             ├── merges.txt
             └── special_tokens_map.json
+```
+
+**Windows:**
+```
+C:\Users\<username>\.cache\huggingface\hub\
+└── models--openai--clip-vit-base-patch32\
+    ├── refs\
+    │   └── main
+    └── snapshots\
+        └── <commit-hash>\
+            ├── config.json
+            ├── pytorch_model.bin        # ← 605 MB
+            ├── (... same files as above)
+```
+
+**To check your cache location:**
+```python
+import os
+from pathlib import Path
+cache = os.environ.get('HF_HOME', Path.home() / '.cache' / 'huggingface')
+print(f"Cache: {cache}")
 ```
 
 ---
@@ -140,23 +162,45 @@ Download individual files from HuggingFace:
 
 ## ⚡ **Quick Commands**
 
-### **Download with wget:**
+### **Linux/Mac - Download with wget:**
 ```bash
 wget https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/pytorch_model.bin
 wget https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/config.json
 # ... (repeat for all 8 files)
 ```
 
-### **Download with curl:**
+### **Linux/Mac - Download with curl:**
 ```bash
 curl -L -O https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/pytorch_model.bin
 curl -L -O https://huggingface.co/openai/clip-vit-base-patch32/resolve/main/config.json
 # ... (repeat for all 8 files)
 ```
 
-### **Download all at once:**
+### **Linux/Mac - Download all at once:**
 ```bash
 bash scripts/download_clip_manual.sh
+```
+
+### **Windows PowerShell - Download all files:**
+```powershell
+# Download using PowerShell
+$base_url = "https://huggingface.co/openai/clip-vit-base-patch32/resolve/main"
+$files = @("config.json", "preprocessor_config.json", "vocab.json", "merges.txt",
+           "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
+           "pytorch_model.bin")
+
+New-Item -ItemType Directory -Force -Path "clip-vit-base-patch32"
+Set-Location "clip-vit-base-patch32"
+
+foreach ($file in $files) {
+    Write-Host "Downloading $file..."
+    Invoke-WebRequest -Uri "$base_url/$file" -OutFile $file
+}
+```
+
+### **Windows - Using Python script (Easiest):**
+```powershell
+python scripts/download_clip_model.py
 ```
 
 ---
@@ -209,6 +253,29 @@ bash scripts/train_cdan.sh --epochs 30
 **Solution:**
 - You only need PyTorch version (~610 MB)
 - Skip TensorFlow/Flax files (saves 1.2 GB)
+
+### **Issue: Windows DLL Error - "c10.dll initialization failed"**
+**Solution (Windows users):**
+This occurs when PyTorch is missing Visual C++ dependencies.
+
+**Option 1: Use conda (Recommended)**
+```powershell
+# Deactivate any venv first
+deactivate
+
+# Install PyTorch via conda
+conda install pytorch torchvision torchaudio cpuonly -c pytorch
+```
+
+**Option 2: Reinstall PyTorch in venv**
+```powershell
+pip uninstall torch torchvision torchaudio -y
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+```
+
+**Option 3: Install Visual C++ Redistributables**
+- Download: https://aka.ms/vs/17/release/vc_redist.x64.exe
+- Install and restart terminal
 
 ---
 
