@@ -22,14 +22,16 @@ class CLIPImageEncoder(nn.Module):
         Initialize CLIP vision encoder.
 
         Args:
-            model_name: HuggingFace model identifier
+            model_name: HuggingFace model identifier or local path
             freeze: Whether to freeze the encoder weights
             extract_layer: Which transformer layer to extract features from (-1 for last)
         """
         super().__init__()
 
         # Load pretrained CLIP model
-        self.clip_model = CLIPModel.from_pretrained(model_name)
+        import os
+        is_local = os.path.exists(model_name)
+        self.clip_model = CLIPModel.from_pretrained(model_name, local_files_only=is_local)
         self.vision_model = self.clip_model.vision_model
         self.visual_projection = self.clip_model.visual_projection
 
@@ -118,9 +120,11 @@ class CLIPImageProcessor:
         """Initialize image processor.
 
         Args:
-            model_name: HuggingFace model identifier
+            model_name: HuggingFace model identifier or local path
         """
-        self.processor = CLIPProcessor.from_pretrained(model_name)
+        import os
+        is_local = os.path.exists(model_name)
+        self.processor = CLIPProcessor.from_pretrained(model_name, local_files_only=is_local)
         self.image_processor = self.processor.image_processor
 
     def __call__(self, images, device='cpu'):

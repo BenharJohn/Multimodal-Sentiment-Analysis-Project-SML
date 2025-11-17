@@ -21,14 +21,16 @@ class CLIPTextEncoder(nn.Module):
         Initialize CLIP text encoder.
 
         Args:
-            model_name: HuggingFace model identifier
+            model_name: HuggingFace model identifier or local path
             freeze: Whether to freeze the encoder weights
             extract_layer: Which transformer layer to extract features from (-1 for last)
         """
         super().__init__()
 
         # Load pretrained CLIP model
-        self.clip_model = CLIPModel.from_pretrained(model_name)
+        import os
+        is_local = os.path.exists(model_name)
+        self.clip_model = CLIPModel.from_pretrained(model_name, local_files_only=is_local)
         self.text_model = self.clip_model.text_model
         self.text_projection = self.clip_model.text_projection
 
@@ -119,10 +121,13 @@ class CLIPTextProcessor:
         """Initialize text processor.
 
         Args:
-            model_name: HuggingFace model identifier
+            model_name: HuggingFace model identifier or local path
             max_length: Maximum sequence length (CLIP default is 77)
         """
-        self.processor = CLIPProcessor.from_pretrained(model_name)
+        # Check if model_name is a local path
+        import os
+        is_local = os.path.exists(model_name)
+        self.processor = CLIPProcessor.from_pretrained(model_name, local_files_only=is_local)
         self.tokenizer = self.processor.tokenizer
         self.max_length = max_length
 
