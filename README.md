@@ -21,6 +21,16 @@ This repository implements a state-of-the-art multimodal sentiment analysis syst
 ✅ Early stopping and checkpointing
 ✅ Attention visualization (optional)
 
+---
+
+## 📖 **Quick Start Guides**
+
+- **🪟 Windows Users:** See [WINDOWS_QUICKSTART.md](WINDOWS_QUICKSTART.md) for step-by-step Windows setup
+- **🐧 Linux/Mac Users:** Continue reading this README
+- **🔌 Offline Setup:** See [OFFLINE_SETUP.md](OFFLINE_SETUP.md) for downloading CLIP model without internet
+
+---
+
 ## Architecture
 
 ```
