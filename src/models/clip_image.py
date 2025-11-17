@@ -125,7 +125,8 @@ class CLIPImageProcessor:
         import os
         is_local = os.path.exists(model_name)
         self.processor = CLIPProcessor.from_pretrained(model_name, local_files_only=is_local)
-        self.image_processor = self.processor.image_processor
+        # For transformers 4.18.0 compatibility
+        self.image_processor = getattr(self.processor, 'image_processor', getattr(self.processor, 'feature_extractor', self.processor))
 
     def __call__(self, images, device='cpu'):
         """
