@@ -20,7 +20,6 @@ print()
 
 try:
     from transformers import CLIPModel, CLIPProcessor, CLIPTokenizer
-    from transformers import AutoImageProcessor
 
     print("Step 1/4: Downloading CLIP model...")
     model = CLIPModel.from_pretrained(model_name)
