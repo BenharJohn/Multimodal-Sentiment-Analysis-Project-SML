@@ -287,7 +287,7 @@ def build_datamodule(config: Dict) -> MVSADataModule:
         val_split=config.get('val_split', 0.1),
         test_split=config.get('test_split', 0.1),
         random_seed=config.get('random_seed', 42),
-        clip_model_name=config.get('clip_model_name', 'openai/clip-vit-base-patch32'),
+        clip_model_name=config.get('clip_model', config.get('clip_model_name', 'openai/clip-vit-base-patch32')),
         max_text_length=config.get('max_text_length', 77),
         batch_size=config.get('batch_size', 32),
         num_workers=config.get('num_workers', 4),

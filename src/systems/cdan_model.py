@@ -381,7 +381,7 @@ def build_cdan_model(config: dict) -> CDANModel:
         Initialized CDANModel
     """
     return CDANModel(
-        clip_model_name=config.get('clip_model_name', 'openai/clip-vit-base-patch32'),
+        clip_model_name=config.get('clip_model', config.get('clip_model_name', 'openai/clip-vit-base-patch32')),
         num_classes=config.get('num_classes', 3),
         freeze_clip=config.get('freeze_clip', True),
         cross_attn_layers=config.get('cross_attn_layers', 2),
