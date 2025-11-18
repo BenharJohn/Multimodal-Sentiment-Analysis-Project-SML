@@ -71,7 +71,10 @@ class MetricsCalculator:
         self.all_labels.extend(labels_np.tolist())
 
         if probabilities is not None:
-            probs_np = probabilities.cpu().numpy() if torch.is_tensor(probabilities) else probabilities
+            if torch.is_tensor(probabilities):
+                probs_np = probabilities.detach().cpu().numpy()
+            else:
+                probs_np = probabilities
             self.all_probs.extend(probs_np.tolist())
 
     def compute(self) -> Dict:
