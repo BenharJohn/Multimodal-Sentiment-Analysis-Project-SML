@@ -27,8 +27,12 @@ def load_metrics(log_dir):
     # Try to load metrics.json
     metrics_file = log_dir / 'metrics.json'
     if metrics_file.exists():
+        print(f"Loading from metrics.json...")
         with open(metrics_file, 'r') as f:
-            return json.load(f)
+            raw_metrics = json.load(f)
+
+        # Convert from epoch-keyed dict to arrays
+        return convert_metrics_dict(raw_metrics)
 
     # Otherwise parse the log file
     log_file = None
@@ -40,6 +44,39 @@ def load_metrics(log_dir):
         raise FileNotFoundError(f"No metrics.json or .log file found in {log_dir}")
 
     return parse_log_file(log_file)
+
+
+def convert_metrics_dict(raw_metrics):
+    """
+    Convert metrics from dict format to arrays.
+
+    Input format: {"1": {"train_accuracy": ..., "val_loss": ...}, "2": {...}}
+    Output format: {"epochs": [1,2,...], "train_loss": [...], ...}
+    """
+    metrics = {
+        'epochs': [],
+        'train_loss': [],
+        'train_acc': [],
+        'val_loss': [],
+        'val_acc': [],
+        'val_f1': []
+    }
+
+    # Sort epochs numerically
+    epoch_keys = sorted([int(k) for k in raw_metrics.keys()])
+
+    for epoch in epoch_keys:
+        epoch_data = raw_metrics[str(epoch)]
+
+        metrics['epochs'].append(epoch)
+        metrics['train_loss'].append(epoch_data.get('train_loss', 0.0))
+        metrics['train_acc'].append(epoch_data.get('train_accuracy', 0.0))
+        metrics['val_loss'].append(epoch_data.get('val_loss', 0.0))
+        metrics['val_acc'].append(epoch_data.get('val_accuracy', 0.0))
+        metrics['val_f1'].append(epoch_data.get('val_f1', 0.0))
+
+    print(f"Loaded {len(metrics['epochs'])} epochs from metrics.json")
+    return metrics
 
 
 def parse_log_file(log_file):
