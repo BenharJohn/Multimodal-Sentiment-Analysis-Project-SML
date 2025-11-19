@@ -53,50 +53,88 @@ def parse_log_file(log_file):
         'val_f1': []
     }
 
+    print(f"Parsing log file: {log_file}")
+
     with open(log_file, 'r') as f:
-        for line in f:
-            # Parse training metrics
-            if '| train_loss:' in line and '| train_acc:' in line:
-                parts = line.split('|')
-                epoch = None
-                train_loss = None
-                train_acc = None
+        lines = f.readlines()
 
-                for part in parts:
-                    part = part.strip()
-                    if part.startswith('Step '):
-                        epoch = int(part.split()[1])
-                    elif part.startswith('train_loss:'):
-                        train_loss = float(part.split(':')[1].strip())
-                    elif part.startswith('train_acc:'):
-                        train_acc = float(part.split(':')[1].strip())
+    current_epoch = None
 
-                if epoch is not None and train_loss is not None:
-                    metrics['epochs'].append(epoch)
+    for line in lines:
+        # Look for epoch start markers
+        if 'Epoch ' in line and '/' in line:
+            # Extract epoch number from "Epoch X/Y" format
+            try:
+                parts = line.split('Epoch ')[1].split('/')
+                current_epoch = int(parts[0].strip())
+            except:
+                pass
+
+        # Parse training metrics - look for train_loss and train_acc
+        if 'train_loss:' in line and 'train_acc:' in line:
+            try:
+                # Extract epoch from Step marker
+                if 'Step ' in line:
+                    epoch_part = line.split('Step ')[1].split('|')[0].strip()
+                    current_epoch = int(epoch_part)
+
+                # Extract train_loss
+                train_loss_part = line.split('train_loss:')[1].split('|')[0].strip()
+                train_loss = float(train_loss_part)
+
+                # Extract train_acc
+                train_acc_part = line.split('train_acc:')[1].strip()
+                # Remove any trailing content
+                train_acc_part = train_acc_part.split('|')[0].strip()
+                train_acc = float(train_acc_part) / 100.0 if train_acc_part else 0.0
+
+                if current_epoch is not None:
+                    metrics['epochs'].append(current_epoch)
                     metrics['train_loss'].append(train_loss)
                     metrics['train_acc'].append(train_acc)
+            except Exception as e:
+                print(f"Warning: Could not parse training metrics from line: {line.strip()[:100]}")
+                print(f"  Error: {e}")
 
-            # Parse validation metrics
-            if '| val_loss:' in line:
-                parts = line.split('|')
-                val_loss = None
-                val_acc = None
-                val_f1 = None
+        # Parse validation metrics
+        if 'val_loss:' in line and 'val_accuracy:' in line:
+            try:
+                # Extract val_loss
+                val_loss_part = line.split('val_loss:')[1].split('|')[0].strip()
+                val_loss = float(val_loss_part)
 
-                for part in parts:
-                    part = part.strip()
-                    if part.startswith('val_loss:'):
-                        val_loss = float(part.split(':')[1].strip())
-                    elif part.startswith('val_accuracy:'):
-                        val_acc = float(part.split(':')[1].strip())
-                    elif part.startswith('val_f1:'):
-                        val_f1 = float(part.split(':')[1].strip())
+                # Extract val_accuracy
+                val_acc_part = line.split('val_accuracy:')[1].split('|')[0].strip()
+                val_acc = float(val_acc_part)
 
-                if val_loss is not None:
-                    metrics['val_loss'].append(val_loss)
-                    metrics['val_acc'].append(val_acc if val_acc else 0.0)
-                    metrics['val_f1'].append(val_f1 if val_f1 else 0.0)
+                # Extract val_f1 if present
+                val_f1 = 0.0
+                if 'val_f1:' in line:
+                    val_f1_part = line.split('val_f1:')[1].split('|')[0].strip()
+                    val_f1 = float(val_f1_part)
 
+                metrics['val_loss'].append(val_loss)
+                metrics['val_acc'].append(val_acc)
+                metrics['val_f1'].append(val_f1)
+            except Exception as e:
+                print(f"Warning: Could not parse validation metrics from line: {line.strip()[:100]}")
+                print(f"  Error: {e}")
+
+    # Ensure we have data
+    if not metrics['epochs']:
+        raise ValueError(f"No training metrics found in {log_file}. Check log file format.")
+
+    # Ensure val metrics match epoch count (pad if needed)
+    epoch_count = len(metrics['epochs'])
+    if len(metrics['val_loss']) < epoch_count:
+        print(f"Warning: Found {len(metrics['val_loss'])} validation entries for {epoch_count} epochs")
+        # Pad with last value or zeros
+        while len(metrics['val_loss']) < epoch_count:
+            metrics['val_loss'].append(metrics['val_loss'][-1] if metrics['val_loss'] else 0.0)
+            metrics['val_acc'].append(metrics['val_acc'][-1] if metrics['val_acc'] else 0.0)
+            metrics['val_f1'].append(metrics['val_f1'][-1] if metrics['val_f1'] else 0.0)
+
+    print(f"Successfully parsed {len(metrics['epochs'])} epochs")
     return metrics
 
 
