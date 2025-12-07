@@ -1,6 +1,7 @@
 """
 Training Script for CDAN Model
 Main entry point for training the multimodal sentiment analysis model.
+Enhanced with: warmup scheduler, mixup augmentation, EMA, early stopping.
 """
 
 import argparse
@@ -10,18 +11,158 @@ from pathlib import Path
 import yaml
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau, LambdaLR
 from tqdm import tqdm
+import copy
+import math
 
 # Add src to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from systems.cdan_model import build_cdan_model
 from data.datamodule import build_datamodule
+from data.augmentation import MixupAugmentation, mixup_criterion
 from utils.metrics import MetricsCalculator, AverageMeter, ProgressTracker
 from utils.seed import set_seed
 from utils.logging import ExperimentLogger, log_system_info
+
+
+class EMAModel:
+    """
+    Exponential Moving Average (EMA) for model weights.
+    Improves generalization by maintaining a smoothed version of model weights.
+    """
+
+    def __init__(self, model: nn.Module, decay: float = 0.999):
+        """
+        Initialize EMA model.
+
+        Args:
+            model: The model to track
+            decay: EMA decay factor (higher = smoother)
+        """
+        self.decay = decay
+        self.shadow = {}
+        self.backup = {}
+
+        # Initialize shadow parameters
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                self.shadow[name] = param.data.clone()
+
+    def update(self, model: nn.Module):
+        """Update EMA weights."""
+        for name, param in model.named_parameters():
+            if param.requires_grad and name in self.shadow:
+                self.shadow[name] = (
+                    self.decay * self.shadow[name] +
+                    (1 - self.decay) * param.data
+                )
+
+    def apply_shadow(self, model: nn.Module):
+        """Apply EMA weights to model (for evaluation)."""
+        for name, param in model.named_parameters():
+            if param.requires_grad and name in self.shadow:
+                self.backup[name] = param.data.clone()
+                param.data = self.shadow[name]
+
+    def restore(self, model: nn.Module):
+        """Restore original weights after evaluation."""
+        for name, param in model.named_parameters():
+            if param.requires_grad and name in self.backup:
+                param.data = self.backup[name]
+        self.backup = {}
+
+
+class EarlyStopping:
+    """
+    Early stopping to prevent overfitting.
+    Stops training if validation metric doesn't improve.
+    """
+
+    def __init__(
+        self,
+        patience: int = 10,
+        min_delta: float = 0.001,
+        mode: str = 'max'
+    ):
+        """
+        Initialize early stopping.
+
+        Args:
+            patience: Number of epochs to wait before stopping
+            min_delta: Minimum improvement to count as progress
+            mode: 'max' for metrics to maximize (F1), 'min' for loss
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+
+    def __call__(self, score: float) -> bool:
+        """
+        Check if training should stop.
+
+        Args:
+            score: Current validation score
+
+        Returns:
+            True if training should stop
+        """
+        if self.best_score is None:
+            self.best_score = score
+            return False
+
+        if self.mode == 'max':
+            improved = score > self.best_score + self.min_delta
+        else:
+            improved = score < self.best_score - self.min_delta
+
+        if improved:
+            self.best_score = score
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+
+        return self.early_stop
+
+
+def get_cosine_schedule_with_warmup(
+    optimizer,
+    num_warmup_steps: int,
+    num_training_steps: int,
+    min_lr_ratio: float = 0.01
+):
+    """
+    Create cosine schedule with linear warmup.
+
+    Args:
+        optimizer: The optimizer
+        num_warmup_steps: Number of warmup steps
+        num_training_steps: Total training steps
+        min_lr_ratio: Minimum LR as ratio of initial LR
+
+    Returns:
+        LR scheduler
+    """
+    def lr_lambda(current_step: int):
+        # Warmup phase
+        if current_step < num_warmup_steps:
+            return float(current_step) / float(max(1, num_warmup_steps))
+
+        # Cosine decay phase
+        progress = float(current_step - num_warmup_steps) / float(
+            max(1, num_training_steps - num_warmup_steps)
+        )
+        return max(min_lr_ratio, 0.5 * (1.0 + math.cos(math.pi * progress)))
+
+    return LambdaLR(optimizer, lr_lambda)
 
 
 def parse_args():
@@ -109,9 +250,30 @@ def train_epoch(
     device,
     epoch,
     logger,
-    gradient_clip=1.0
+    gradient_clip=1.0,
+    scheduler=None,
+    use_mixup=False,
+    mixup_augmentation=None,
+    ema_model=None,
+    gradient_accumulation_steps=1
 ):
-    """Train for one epoch."""
+    """
+    Train for one epoch with advanced techniques.
+
+    Args:
+        model: The model to train
+        dataloader: Training data loader
+        optimizer: Optimizer
+        device: Device to use
+        epoch: Current epoch number
+        logger: Experiment logger
+        gradient_clip: Gradient clipping threshold
+        scheduler: Learning rate scheduler (for step-level scheduling)
+        use_mixup: Whether to use mixup augmentation
+        mixup_augmentation: Mixup augmentation instance
+        ema_model: EMA model for weight averaging
+        gradient_accumulation_steps: Number of steps to accumulate gradients
+    """
     model.train()
 
     loss_meter = AverageMeter('Loss', ':.4f')
@@ -121,48 +283,118 @@ def train_epoch(
 
     pbar = tqdm(dataloader, desc=f'Epoch {epoch} [Train]')
 
-    for batch in pbar:
+    optimizer.zero_grad()
+    accumulation_counter = 0
+
+    for batch_idx, batch in enumerate(pbar):
         # Move to device
         input_ids = batch['input_ids'].to(device)
         attention_mask = batch['attention_mask'].to(device)
         pixel_values = batch['pixel_values'].to(device)
         labels = batch['labels'].to(device)
 
-        # Forward
-        outputs = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            pixel_values=pixel_values,
-            labels=labels
-        )
+        # Apply mixup if enabled
+        if use_mixup and mixup_augmentation is not None:
+            batch_dict = {
+                'input_ids': input_ids,
+                'attention_mask': attention_mask,
+                'pixel_values': pixel_values,
+                'labels': labels
+            }
+            mixed_batch, labels_a, labels_b, lam = mixup_augmentation(batch_dict)
 
-        loss = outputs['loss']
-        logits = outputs['logits']
+            # Forward with mixed inputs
+            outputs = model(
+                input_ids=mixed_batch['input_ids'],
+                attention_mask=mixed_batch['attention_mask'],
+                pixel_values=mixed_batch['pixel_values'],
+                labels=None  # Compute loss manually for mixup
+            )
+
+            logits = outputs['logits']
+
+            # Mixup loss
+            loss = mixup_criterion(
+                F.cross_entropy,
+                logits,
+                labels_a,
+                labels_b,
+                lam
+            )
+
+            # Add auxiliary loss if present
+            if 'aux_loss' in outputs:
+                aux_weight = model.aux_loss_weight if hasattr(model, 'aux_loss_weight') else 0.1
+                loss = loss + aux_weight * outputs['aux_loss']
+        else:
+            # Standard forward pass
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                pixel_values=pixel_values,
+                labels=labels
+            )
+
+            loss = outputs['loss']
+            logits = outputs['logits']
+
+        # Scale loss for gradient accumulation
+        loss = loss / gradient_accumulation_steps
 
         # Backward
-        optimizer.zero_grad()
         loss.backward()
 
-        # Gradient clipping
-        if gradient_clip > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+        accumulation_counter += 1
 
-        optimizer.step()
+        # Update weights after accumulation steps
+        if accumulation_counter >= gradient_accumulation_steps:
+            # Gradient clipping
+            if gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
 
-        # Metrics
+            optimizer.step()
+            optimizer.zero_grad()
+            accumulation_counter = 0
+
+            # Update EMA model
+            if ema_model is not None:
+                ema_model.update(model)
+
+            # Step-level scheduler update
+            if scheduler is not None and hasattr(scheduler, 'step_batch'):
+                scheduler.step()
+
+        # Metrics (use original labels for accuracy calculation)
         preds = torch.argmax(logits, dim=-1)
-        acc = (preds == labels).float().mean()
+        if use_mixup and mixup_augmentation is not None:
+            # For mixup, use weighted accuracy
+            acc = lam * (preds == labels_a).float().mean() + \
+                  (1 - lam) * (preds == labels_b).float().mean()
+            metrics_calc.update(preds, labels_a, torch.softmax(logits, dim=-1))
+        else:
+            acc = (preds == labels).float().mean()
+            metrics_calc.update(preds, labels, torch.softmax(logits, dim=-1))
 
-        loss_meter.update(loss.item(), input_ids.size(0))
+        # Rescale loss for logging
+        loss_meter.update(loss.item() * gradient_accumulation_steps, input_ids.size(0))
         acc_meter.update(acc.item() * 100, input_ids.size(0))
 
-        metrics_calc.update(preds, labels, torch.softmax(logits, dim=-1))
-
         # Update progress bar
+        current_lr = optimizer.param_groups[0]['lr']
         pbar.set_postfix({
             'loss': f'{loss_meter.avg:.4f}',
-            'acc': f'{acc_meter.avg:.2f}%'
+            'acc': f'{acc_meter.avg:.2f}%',
+            'lr': f'{current_lr:.2e}'
         })
+
+    # Handle any remaining accumulated gradients
+    if accumulation_counter > 0:
+        if gradient_clip > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
+        optimizer.step()
+        optimizer.zero_grad()
+        if ema_model is not None:
+            ema_model.update(model)
 
     # Compute metrics
     metrics = metrics_calc.compute()
@@ -217,7 +449,7 @@ def validate(model, dataloader, device, epoch, logger):
 
 
 def main():
-    """Main training function."""
+    """Main training function with advanced techniques."""
     args = parse_args()
 
     # Load config file if exists
@@ -287,13 +519,57 @@ def main():
     else:
         raise ValueError(f"Unsupported optimizer: {config['optimizer']}")
 
+    # Calculate total training steps for warmup scheduler
+    num_training_steps = len(train_loader) * config['epochs']
+    warmup_epochs = config.get('warmup_epochs', 3)
+    num_warmup_steps = len(train_loader) * warmup_epochs
+
     # Scheduler
-    if config['scheduler'] == 'cosine':
+    scheduler_type = config.get('scheduler', 'cosine')
+    if scheduler_type == 'cosine_warmup':
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_training_steps,
+            min_lr_ratio=0.01
+        )
+        scheduler.step_batch = True  # Mark for step-level updates
+        exp_logger.log(f"Using cosine scheduler with {warmup_epochs} epochs warmup")
+    elif scheduler_type == 'cosine':
         scheduler = CosineAnnealingLR(optimizer, T_max=config['epochs'])
-    elif config['scheduler'] == 'plateau':
+    elif scheduler_type == 'plateau':
         scheduler = ReduceLROnPlateau(optimizer, mode='max', patience=3, factor=0.5)
     else:
         scheduler = None
+
+    # Initialize EMA model
+    ema_model = None
+    if config.get('use_ema', False):
+        ema_decay = config.get('ema_decay', 0.999)
+        ema_model = EMAModel(model, decay=ema_decay)
+        exp_logger.log(f"Using EMA with decay={ema_decay}")
+
+    # Initialize mixup augmentation
+    mixup_augmentation = None
+    use_mixup = config.get('use_mixup', False)
+    if use_mixup:
+        mixup_alpha = config.get('mixup_alpha', 0.2)
+        mixup_augmentation = MixupAugmentation(alpha=mixup_alpha)
+        exp_logger.log(f"Using mixup augmentation with alpha={mixup_alpha}")
+
+    # Initialize early stopping
+    early_stopping = None
+    if config.get('early_stopping', False):
+        patience = config.get('patience', 10)
+        min_delta = config.get('min_delta', 0.001)
+        early_stopping = EarlyStopping(patience=patience, min_delta=min_delta, mode='max')
+        exp_logger.log(f"Using early stopping with patience={patience}")
+
+    # Gradient accumulation
+    gradient_accumulation_steps = config.get('gradient_accumulation_steps', 1)
+    if config.get('use_gradient_accumulation', False) and gradient_accumulation_steps > 1:
+        exp_logger.log(f"Using gradient accumulation with {gradient_accumulation_steps} steps")
+        exp_logger.log(f"Effective batch size: {config['batch_size'] * gradient_accumulation_steps}")
 
     # Resume from checkpoint
     start_epoch = 1
@@ -306,6 +582,14 @@ def main():
 
     # Training loop
     exp_logger.log("Starting training...")
+    exp_logger.log(f"Configuration highlights:")
+    exp_logger.log(f"  - Cross-attention layers: {config.get('cross_attn_layers', 2)}")
+    exp_logger.log(f"  - Gate type: {config.get('gate_type', 'simple')}")
+    exp_logger.log(f"  - Label smoothing: {config.get('label_smoothing', 0.0)}")
+    exp_logger.log(f"  - Data augmentation: {config.get('augment_train', False)}")
+    exp_logger.log(f"  - Mixup: {use_mixup}")
+    exp_logger.log(f"  - EMA: {config.get('use_ema', False)}")
+
     tracker = ProgressTracker()
     best_val_f1 = 0.0
 
@@ -330,10 +614,18 @@ def main():
             device=device,
             epoch=epoch,
             logger=exp_logger,
-            gradient_clip=config['gradient_clip']
+            gradient_clip=config['gradient_clip'],
+            scheduler=scheduler if scheduler_type == 'cosine_warmup' else None,
+            use_mixup=use_mixup,
+            mixup_augmentation=mixup_augmentation,
+            ema_model=ema_model,
+            gradient_accumulation_steps=gradient_accumulation_steps if config.get('use_gradient_accumulation', False) else 1
         )
 
-        # Validate
+        # Validate (with EMA weights if available)
+        if ema_model is not None:
+            ema_model.apply_shadow(model)
+
         val_metrics = validate(
             model=model,
             dataloader=val_loader,
@@ -341,6 +633,9 @@ def main():
             epoch=epoch,
             logger=exp_logger
         )
+
+        if ema_model is not None:
+            ema_model.restore(model)
 
         # Log metrics
         exp_logger.log_metrics(train_metrics, epoch, prefix='train_')
@@ -356,8 +651,8 @@ def main():
             'learning_rates': optimizer.param_groups[0]['lr']
         })
 
-        # Scheduler step
-        if scheduler is not None:
+        # Scheduler step (for non-step-level schedulers)
+        if scheduler is not None and scheduler_type != 'cosine_warmup':
             if isinstance(scheduler, ReduceLROnPlateau):
                 scheduler.step(val_metrics['f1'])
             else:
@@ -369,7 +664,12 @@ def main():
             best_val_f1 = val_metrics['f1']
             exp_logger.log(f"New best model! Val F1: {best_val_f1:.4f}")
 
-        if epoch % config['save_freq'] == 0 or is_best:
+        save_best_only = config.get('save_best_only', False)
+        if is_best or (not save_best_only and epoch % config['save_freq'] == 0):
+            # Save with EMA weights if available
+            if ema_model is not None:
+                ema_model.apply_shadow(model)
+
             exp_logger.save_checkpoint(
                 model=model,
                 optimizer=optimizer,
@@ -377,6 +677,15 @@ def main():
                 metrics={'val_f1': val_metrics['f1']},
                 is_best=is_best
             )
+
+            if ema_model is not None:
+                ema_model.restore(model)
+
+        # Check early stopping
+        if early_stopping is not None:
+            if early_stopping(val_metrics['f1']):
+                exp_logger.log(f"Early stopping triggered at epoch {epoch}")
+                break
 
     # Finalize
     exp_logger.log(f"\nTraining completed!")

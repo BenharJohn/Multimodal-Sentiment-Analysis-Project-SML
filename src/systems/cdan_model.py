@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.clip_text import CLIPTextEncoder
 from models.clip_image import CLIPImageEncoder
 from models.cross_attention import BidirectionalCrossAttention
-from models.gating import ModalityGate, AttentionGate
+from models.gating import ModalityGate, AttentionGate, HierarchicalGate
 from models.aux_decoder import DualAuxiliaryDecoder
 from models.classifier import MLPClassifier
 
@@ -145,6 +145,12 @@ class CDANModel(nn.Module):
                 )
             elif gate_type == "attention":
                 self.gate = AttentionGate(
+                    embed_dim=self.hidden_dim,
+                    num_modalities=2,
+                    dropout=cross_attn_dropout
+                )
+            elif gate_type == "hierarchical":
+                self.gate = HierarchicalGate(
                     embed_dim=self.hidden_dim,
                     num_modalities=2,
                     dropout=cross_attn_dropout
