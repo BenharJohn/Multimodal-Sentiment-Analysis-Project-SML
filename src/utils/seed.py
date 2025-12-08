@@ -9,13 +9,14 @@ import torch
 import os
 
 
-def set_seed(seed: int = 42, deterministic: bool = True):
+def set_seed(seed: int = 42, deterministic: bool = False):
     """
     Set random seed for reproducibility.
 
     Args:
         seed: Random seed value
         deterministic: Whether to enable deterministic mode (slower but reproducible)
+                      Default is False to avoid CUBLAS errors on CUDA >= 10.2
     """
     # Python random
     random.seed(seed)
@@ -32,6 +33,11 @@ def set_seed(seed: int = 42, deterministic: bool = True):
     os.environ['PYTHONHASHSEED'] = str(seed)
 
     if deterministic:
+        # Set CUBLAS workspace config for deterministic cuBLAS operations
+        # Required for CUDA >= 10.2 when using deterministic algorithms
+        if 'CUBLAS_WORKSPACE_CONFIG' not in os.environ:
+            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+
         # Enable deterministic mode
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
@@ -40,14 +46,15 @@ def set_seed(seed: int = 42, deterministic: bool = True):
         if hasattr(torch, 'use_deterministic_algorithms'):
             torch.use_deterministic_algorithms(True)
     else:
-        # For better performance
-        torch.backends.cudnn.benchmark = True
+        # For better performance (still reproducible for most operations)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
     print(f"Random seed set to {seed}")
     if deterministic:
         print("Deterministic mode enabled (slower but reproducible)")
     else:
-        print("Deterministic mode disabled (faster but may vary)")
+        print("Standard reproducibility mode (fast and mostly reproducible)")
 
 
 def worker_init_fn(worker_id: int, seed: int = 42):

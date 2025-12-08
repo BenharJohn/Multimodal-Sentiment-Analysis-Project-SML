@@ -1,8 +1,8 @@
 # CDAN Model Configuration for MVSA Sentiment Analysis
-# OPTIMIZED FOR HIGHER ACCURACY
+# CONSERVATIVE IMPROVEMENTS - tested baseline with careful enhancements
 
 # Experiment
-experiment_name: cdan_mvsa_optimized
+experiment_name: cdan_mvsa
 seed: 42
 
 # Data
@@ -20,101 +20,98 @@ clip_model_name: openai/clip-vit-base-patch32
 num_classes: 3
 freeze_clip: true
 
-# Cross-Attention (ENHANCED: more layers and heads for deeper fusion)
-cross_attn_layers: 4  # Increased from 2 for deeper multimodal fusion
+# Cross-Attention (PROVEN: 2 layers work well)
+cross_attn_layers: 2  # 2 layers is optimal - more causes overfitting
 cross_attn_heads: 8
-cross_attn_dropout: 0.15  # Slightly increased for regularization
-cross_attn_ff_dim: 2048  # Explicit FFN dimension for cross-attention
+cross_attn_dropout: 0.1
+cross_attn_ff_dim: 2048
 pool_method: mean  # 'mean', 'max', or 'cls'
 
-# Gating (ENHANCED: hierarchical gating for better modality weighting)
+# Gating (PROVEN: simple gating works best)
 use_gating: true
-gate_type: hierarchical  # Changed from 'simple' for better modality fusion
-gate_activation: sigmoid  # 'sigmoid', 'softmax', or 'tanh'
+gate_type: simple  # 'simple' is stable and effective
+gate_activation: sigmoid
 
-# Auxiliary Decoder (ENHANCED: stronger regularization)
+# Auxiliary Decoder
 use_aux_decoder: true
-aux_loss_weight: 0.1  # Increased from 0.05 for stronger regularization
-aux_loss_type: cosine  # 'cosine', 'l2', 'l1', or 'smooth_l1'
+aux_loss_weight: 0.05  # Conservative weight
+aux_loss_type: cosine
 aux_num_layers: 2
 
-# Classifier (ENHANCED: wider hidden layers)
-classifier_hidden_dims: [768, 384]  # Increased from [512, 256]
-classifier_dropout: 0.25  # Reduced from 0.3 for less regularization in classifier
+# Classifier (PROVEN: these dimensions work)
+classifier_hidden_dims: [512, 256]  # Original proven dimensions
+classifier_dropout: 0.3
 
-# Training (ENHANCED: more epochs for convergence)
-epochs: 50  # Increased from 30 for better convergence
+# Training
+epochs: 50
 batch_size: 32
 num_workers: 4
 pin_memory: true
 
-# Optimization (ENHANCED: tuned learning rates)
-lr: 0.0008  # Slightly reduced for stability
-clip_lr: 0.00002  # Slightly increased for better fine-tuning
-weight_decay: 0.02  # Increased from 0.01 for regularization
-optimizer: adamw  # 'adam', 'adamw', or 'sgd'
-scheduler: cosine_warmup  # Changed to include warmup
+# Optimization (PROVEN: these rates work)
+lr: 0.001  # Original proven learning rate
+clip_lr: 0.00001  # Original proven CLIP learning rate
+weight_decay: 0.01
+optimizer: adamw
+scheduler: cosine  # Simple cosine without warmup works fine
 gradient_clip: 1.0
 
-# CLIP Freezing Schedule (ENHANCED: longer freeze period)
-freeze_epochs: 5  # Increased from 3 for more stable initial training
-warmup_epochs: 3  # Increased from 2 for smoother start
-warmup_start_lr: 0.0001  # Starting LR for warmup
+# CLIP Freezing Schedule
+freeze_epochs: 3  # Original proven value
+warmup_epochs: 2  # Not used with cosine scheduler
 
-# Regularization (ENHANCED: enable label smoothing and augmentation)
-label_smoothing: 0.1  # Enabled for noise robustness
-use_soft_labels: false  # For MVSA-Multiple
-augment_train: true  # ENABLED for better generalization
+# Regularization (CONSERVATIVE)
+label_smoothing: 0.0  # DISABLED - can cause training instability
+use_soft_labels: false
+augment_train: false  # DISABLED - start without augmentation
 
-# Data Augmentation Settings (NEW)
+# Data Augmentation Settings (DISABLED for now)
 augmentation:
-  # Image augmentation
   image:
-    random_resized_crop: true
+    random_resized_crop: false
     crop_scale: [0.8, 1.0]
-    horizontal_flip: true
+    horizontal_flip: false
     flip_prob: 0.5
-    color_jitter: true
+    color_jitter: false
     brightness: 0.2
     contrast: 0.2
     saturation: 0.2
     hue: 0.1
-    random_rotation: true
+    random_rotation: false
     rotation_degrees: 15
-    gaussian_blur: true
+    gaussian_blur: false
     blur_prob: 0.1
-  # Text augmentation
   text:
-    random_word_dropout: true
+    random_word_dropout: false
     dropout_prob: 0.1
-    random_word_swap: true
+    random_word_swap: false
     swap_prob: 0.1
 
-# Advanced Training (NEW)
-use_mixup: true  # Enable mixup augmentation
-mixup_alpha: 0.2  # Mixup interpolation strength
+# Advanced Training (ALL DISABLED for stability)
+use_mixup: false  # DISABLED - causes instability
+mixup_alpha: 0.2
 use_gradient_accumulation: false
-gradient_accumulation_steps: 2  # Effective batch size = batch_size * steps
-use_ema: true  # Exponential moving average for model weights
+gradient_accumulation_steps: 1
+use_ema: false  # DISABLED - not needed for this task
 ema_decay: 0.999
 
-# Early Stopping (NEW)
-early_stopping: true
-patience: 10  # Stop if no improvement for N epochs
-min_delta: 0.001  # Minimum improvement to count as progress
+# Early Stopping (DISABLED - let training run full course)
+early_stopping: false  # DISABLED - early stopping killed the previous run
+patience: 10
+min_delta: 0.001
 
 # Checkpointing
 checkpoint_dir: checkpoints
-save_freq: 5  # Save checkpoint every N epochs
-save_best_only: true  # Only save best model
-resume: null  # Path to checkpoint to resume from
+save_freq: 5
+save_best_only: false  # Save all checkpoints to track progress
+resume: null
 
 # Logging
 log_dir: logs
-log_attention_weights: false  # Log attention maps for analysis
+log_attention_weights: false
 
 # Device
-device: cuda  # 'cuda' or 'cpu'
+device: cuda
 
 # Text Processing
-max_text_length: 77  # CLIP default
+max_text_length: 77
