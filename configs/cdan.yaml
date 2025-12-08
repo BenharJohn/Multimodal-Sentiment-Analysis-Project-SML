@@ -65,6 +65,13 @@ label_smoothing: 0.0  # DISABLED - can cause training instability
 use_soft_labels: false
 augment_train: false  # DISABLED - start without augmentation
 
+# Focal Loss for Class Imbalance (NEW)
+# Class distribution: Positive=5638, Negative=601, Neutral=4065
+# Weights calculated as inverse frequency normalized
+use_focal_loss: true  # ENABLED - handles class imbalance
+focal_gamma: 2.0  # Focusing parameter (higher = more focus on hard examples)
+focal_alpha: [1.0, 9.4, 1.4]  # Class weights: [Pos, Neg, Neu] based on inverse freq
+
 # Data Augmentation Settings (DISABLED for now)
 augmentation:
   image:
@@ -95,9 +102,9 @@ gradient_accumulation_steps: 1
 use_ema: false  # DISABLED - not needed for this task
 ema_decay: 0.999
 
-# Early Stopping (DISABLED - let training run full course)
-early_stopping: false  # DISABLED - early stopping killed the previous run
-patience: 10
+# Early Stopping (enabled with longer patience)
+early_stopping: true  # ENABLED - but with longer patience
+patience: 15  # Wait 15 epochs without improvement
 min_delta: 0.001
 
 # Checkpointing

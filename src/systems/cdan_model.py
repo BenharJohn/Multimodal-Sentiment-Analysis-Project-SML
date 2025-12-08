@@ -18,6 +18,7 @@ from models.cross_attention import BidirectionalCrossAttention
 from models.gating import ModalityGate, AttentionGate, HierarchicalGate
 from models.aux_decoder import DualAuxiliaryDecoder
 from models.classifier import MLPClassifier
+from models.losses import FocalLoss
 
 
 class CDANModel(nn.Module):
@@ -62,6 +63,11 @@ class CDANModel(nn.Module):
 
         # Training configuration
         label_smoothing: float = 0.0,
+
+        # Loss configuration
+        use_focal_loss: bool = False,
+        focal_gamma: float = 2.0,
+        focal_alpha: list = None,  # Class weights [w0, w1, w2]
     ):
         """
         Initialize CDAN model.
@@ -84,6 +90,9 @@ class CDANModel(nn.Module):
             classifier_hidden_dims: Hidden dimensions for classifier
             classifier_dropout: Dropout in classifier
             label_smoothing: Label smoothing factor
+            use_focal_loss: Whether to use focal loss for class imbalance
+            focal_gamma: Focusing parameter for focal loss (higher = more focus on hard examples)
+            focal_alpha: Class weights for focal loss [w0, w1, w2]
         """
         super().__init__()
 
@@ -93,6 +102,17 @@ class CDANModel(nn.Module):
         self.use_aux_decoder = use_aux_decoder
         self.aux_loss_weight = aux_loss_weight
         self.label_smoothing = label_smoothing
+        self.use_focal_loss = use_focal_loss
+
+        # Initialize loss function
+        if use_focal_loss:
+            self.loss_fn = FocalLoss(
+                alpha=focal_alpha,
+                gamma=focal_gamma,
+                label_smoothing=label_smoothing
+            )
+        else:
+            self.loss_fn = None  # Will use F.cross_entropy
 
         # CLIP Encoders
         self.text_encoder = CLIPTextEncoder(
@@ -291,8 +311,10 @@ class CDANModel(nn.Module):
 
         # Compute losses if labels are provided
         if labels is not None:
-            # Classification loss
-            if self.label_smoothing > 0:
+            # Classification loss (Focal Loss or Cross-Entropy)
+            if self.use_focal_loss and self.loss_fn is not None:
+                ce_loss = self.loss_fn(logits, labels)
+            elif self.label_smoothing > 0:
                 ce_loss = F.cross_entropy(
                     logits,
                     labels,
@@ -418,5 +440,9 @@ def build_cdan_model(config: dict) -> CDANModel:
         aux_num_layers=config.get('aux_num_layers', 2),
         classifier_hidden_dims=config.get('classifier_hidden_dims', [512, 256]),
         classifier_dropout=config.get('classifier_dropout', 0.3),
-        label_smoothing=config.get('label_smoothing', 0.0)
+        label_smoothing=config.get('label_smoothing', 0.0),
+        # Focal loss for class imbalance
+        use_focal_loss=config.get('use_focal_loss', False),
+        focal_gamma=config.get('focal_gamma', 2.0),
+        focal_alpha=config.get('focal_alpha', None)
     )
