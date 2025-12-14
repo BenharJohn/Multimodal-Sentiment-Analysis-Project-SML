@@ -126,8 +126,8 @@ min_delta: 0.001
 
 # Checkpointing
 checkpoint_dir: checkpoints
-save_freq: 5
-save_best_only: false  # Save all checkpoints to track progress
+save_freq: 10  # Less frequent saves
+save_best_only: true  # Only save best model to reduce disk usage
 resume: null
 
 # Logging
