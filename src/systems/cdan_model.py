@@ -19,6 +19,9 @@ from models.gating import ModalityGate, AttentionGate, HierarchicalGate
 from models.aux_decoder import DualAuxiliaryDecoder
 from models.classifier import MLPClassifier
 from models.losses import FocalLoss
+from models.bert_encoder import BERTTextEncoder
+from models.resnet_encoder import ResNetImageEncoder
+from models.multi_encoder_fusion import AttentionEncoderFusion
 
 
 class CDANModel(nn.Module):
@@ -68,6 +71,12 @@ class CDANModel(nn.Module):
         use_focal_loss: bool = False,
         focal_gamma: float = 2.0,
         focal_alpha: list = None,  # Class weights [w0, w1, w2]
+
+        # Dual encoder configuration (CDAN 2025)
+        use_dual_encoders: bool = False,
+        bert_model_name: str = "bert-base-uncased",
+        resnet_model: str = "resnet50",
+        freeze_aux_encoders: bool = True,
     ):
         """
         Initialize CDAN model.
@@ -93,6 +102,10 @@ class CDANModel(nn.Module):
             use_focal_loss: Whether to use focal loss for class imbalance
             focal_gamma: Focusing parameter for focal loss (higher = more focus on hard examples)
             focal_alpha: Class weights for focal loss [w0, w1, w2]
+            use_dual_encoders: Whether to use dual encoders (CLIP + BERT/ResNet) per CDAN 2025
+            bert_model_name: BERT model name for text auxiliary encoder
+            resnet_model: ResNet model name for image auxiliary encoder
+            freeze_aux_encoders: Whether to freeze auxiliary encoders initially
         """
         super().__init__()
 
@@ -103,6 +116,7 @@ class CDANModel(nn.Module):
         self.aux_loss_weight = aux_loss_weight
         self.label_smoothing = label_smoothing
         self.use_focal_loss = use_focal_loss
+        self.use_dual_encoders = use_dual_encoders
 
         # Initialize loss function
         if use_focal_loss:
@@ -144,6 +158,37 @@ class CDANModel(nn.Module):
             self.image_projection_layer = nn.Linear(self.image_hidden_dim, self.hidden_dim)
         else:
             self.image_projection_layer = nn.Identity()
+
+        # Dual Encoders (CDAN 2025): BERT + ResNet alongside CLIP
+        if self.use_dual_encoders:
+            # BERT text encoder
+            self.bert_encoder = BERTTextEncoder(
+                model_name=bert_model_name,
+                freeze=freeze_aux_encoders
+            )
+            # ResNet image encoder
+            self.resnet_encoder = ResNetImageEncoder(
+                model_name=resnet_model,
+                freeze=freeze_aux_encoders
+            )
+
+            # Attention-based fusion modules
+            # Fuse CLIP text (512) with BERT (768) -> 512
+            self.text_fusion = AttentionEncoderFusion(
+                clip_dim=self.projection_dim,  # 512
+                aux_dim=self.bert_encoder.hidden_dim,  # 768
+                output_dim=self.projection_dim,  # 512
+                num_heads=8,
+                dropout=cross_attn_dropout
+            )
+            # Fuse CLIP vision (512) with ResNet (2048) -> 512
+            self.image_fusion = AttentionEncoderFusion(
+                clip_dim=self.projection_dim,  # 512
+                aux_dim=self.resnet_encoder.hidden_dim,  # 2048
+                output_dim=self.projection_dim,  # 512
+                num_heads=8,
+                dropout=cross_attn_dropout
+            )
 
         # Cross-Attention Fusion
         self.cross_attention = BidirectionalCrossAttention(
@@ -229,17 +274,21 @@ class CDANModel(nn.Module):
         attention_mask: torch.Tensor,
         pixel_values: torch.Tensor,
         labels: Optional[torch.Tensor] = None,
-        return_attention: bool = False
+        return_attention: bool = False,
+        bert_input_ids: Optional[torch.Tensor] = None,
+        bert_attention_mask: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
         """
         Forward pass through the model.
 
         Args:
-            input_ids: [batch_size, seq_len] text token IDs
-            attention_mask: [batch_size, seq_len] text attention mask
+            input_ids: [batch_size, seq_len] CLIP text token IDs
+            attention_mask: [batch_size, seq_len] CLIP text attention mask
             pixel_values: [batch_size, C, H, W] image pixels
             labels: [batch_size] ground truth labels (optional)
             return_attention: Whether to return attention weights
+            bert_input_ids: [batch_size, seq_len] BERT token IDs (for dual encoders)
+            bert_attention_mask: [batch_size, seq_len] BERT attention mask (for dual encoders)
 
         Returns:
             dict with:
@@ -266,6 +315,23 @@ class CDANModel(nn.Module):
         text_pooled = text_outputs['text_pooled']          # [B, projection_dim]
         vision_patches = image_outputs['vision_patches']   # [B, P, image_hidden_dim]
         vision_pooled = image_outputs['vision_pooled']     # [B, projection_dim]
+
+        # Dual encoder fusion (CDAN 2025)
+        if self.use_dual_encoders and bert_input_ids is not None:
+            # Extract BERT features
+            bert_outputs = self.bert_encoder(
+                input_ids=bert_input_ids,
+                attention_mask=bert_attention_mask
+            )
+            bert_pooled = bert_outputs['pooled']  # [B, 768]
+
+            # Extract ResNet features
+            resnet_outputs = self.resnet_encoder(pixel_values)
+            resnet_features = resnet_outputs['features']  # [B, 2048]
+
+            # Fuse CLIP + auxiliary features using attention
+            text_pooled = self.text_fusion(text_pooled, bert_pooled)      # [B, 512]
+            vision_pooled = self.image_fusion(vision_pooled, resnet_features)  # [B, 512]
 
         # Project tokens to common dimension for cross-attention
         text_tokens_proj = self.text_projection_layer(text_tokens)       # [B, T, hidden_dim]
@@ -444,5 +510,10 @@ def build_cdan_model(config: dict) -> CDANModel:
         # Focal loss for class imbalance
         use_focal_loss=config.get('use_focal_loss', False),
         focal_gamma=config.get('focal_gamma', 2.0),
-        focal_alpha=config.get('focal_alpha', None)
+        focal_alpha=config.get('focal_alpha', None),
+        # Dual encoder configuration (CDAN 2025)
+        use_dual_encoders=config.get('use_dual_encoders', False),
+        bert_model_name=config.get('bert_model_name', 'bert-base-uncased'),
+        resnet_model=config.get('resnet_model', 'resnet50'),
+        freeze_aux_encoders=config.get('freeze_aux_encoders', True)
     )

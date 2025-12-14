@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.clip_text import CLIPTextProcessor
 from models.clip_image import CLIPImageProcessor
+from models.bert_encoder import BERTTextProcessor
 from data.mvsa import create_mvsa_dataset, collate_fn
 
 
@@ -48,7 +49,12 @@ class MVSADataModule:
 
         # Other
         use_soft_labels: bool = False,
-        augment_train: bool = False
+        augment_train: bool = False,
+
+        # Dual encoder configuration (CDAN 2025)
+        use_dual_encoders: bool = False,
+        bert_model_name: str = 'bert-base-uncased',
+        bert_max_length: int = 128
     ):
         """
         Initialize data module.
@@ -70,6 +76,9 @@ class MVSADataModule:
             pin_memory: Whether to pin memory for faster GPU transfer
             use_soft_labels: Whether to use soft labels (for MVSA-Multiple)
             augment_train: Whether to augment training data
+            use_dual_encoders: Whether to use BERT + CLIP dual encoders (CDAN 2025)
+            bert_model_name: BERT model name for auxiliary text encoder
+            bert_max_length: Maximum sequence length for BERT tokenizer
         """
         self.dataset_type = dataset_type
         self.data_dir = data_dir
@@ -80,6 +89,7 @@ class MVSADataModule:
         self.random_seed = random_seed
         self.use_soft_labels = use_soft_labels
         self.augment_train = augment_train
+        self.use_dual_encoders = use_dual_encoders
 
         # File paths
         self.train_file = train_file or os.path.join(data_dir, 'train.csv')
@@ -88,7 +98,7 @@ class MVSADataModule:
         self.val_split = val_split
         self.test_split = test_split
 
-        # Initialize processors
+        # Initialize CLIP processors
         self.text_processor = CLIPTextProcessor(
             model_name=clip_model_name,
             max_length=max_text_length
@@ -96,6 +106,14 @@ class MVSADataModule:
         self.image_processor = CLIPImageProcessor(
             model_name=clip_model_name
         )
+
+        # Initialize BERT processor for dual encoders (CDAN 2025)
+        self.bert_processor = None
+        if use_dual_encoders:
+            self.bert_processor = BERTTextProcessor(
+                model_name=bert_model_name,
+                max_length=bert_max_length
+            )
 
         # Datasets (initialized in setup)
         self.train_dataset = None
@@ -172,7 +190,9 @@ class MVSADataModule:
             image_processor=self.image_processor,
             label_map=self.label_map,
             augment=augment,
-            use_soft_labels=self.use_soft_labels
+            use_soft_labels=self.use_soft_labels,
+            bert_processor=self.bert_processor,
+            use_dual_encoders=self.use_dual_encoders
         )
 
     def _split_dataset(self, full_dataset):
@@ -293,5 +313,9 @@ def build_datamodule(config: Dict) -> MVSADataModule:
         num_workers=config.get('num_workers', 4),
         pin_memory=config.get('pin_memory', True),
         use_soft_labels=config.get('use_soft_labels', False),
-        augment_train=config.get('augment_train', False)
+        augment_train=config.get('augment_train', False),
+        # Dual encoder configuration (CDAN 2025)
+        use_dual_encoders=config.get('use_dual_encoders', False),
+        bert_model_name=config.get('bert_model_name', 'bert-base-uncased'),
+        bert_max_length=config.get('bert_max_length', 128)
     )

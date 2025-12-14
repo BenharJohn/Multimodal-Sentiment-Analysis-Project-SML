@@ -1,5 +1,6 @@
 # CDAN Model Configuration for MVSA Sentiment Analysis
-# CONSERVATIVE IMPROVEMENTS - tested baseline with careful enhancements
+# Implements CDAN 2025 paper: "CLIP-driven attention network for multimodal sentiment analysis"
+# Reference: The Journal of Supercomputing, May 2025 - 78.5% accuracy on MVSA-Single
 
 # Experiment
 experiment_name: cdan_mvsa
@@ -65,12 +66,28 @@ label_smoothing: 0.0  # DISABLED - can cause training instability
 use_soft_labels: false
 augment_train: false  # DISABLED - start without augmentation
 
-# Focal Loss for Class Imbalance (NEW)
+# Focal Loss for Class Imbalance
 # Class distribution: Positive=5638, Negative=601, Neutral=4065
 # Weights calculated as inverse frequency normalized
 use_focal_loss: true  # ENABLED - handles class imbalance
 focal_gamma: 2.0  # Focusing parameter (higher = more focus on hard examples)
 focal_alpha: [1.0, 9.4, 1.4]  # Class weights: [Pos, Neg, Neu] based on inverse freq
+
+# =============================================================================
+# DUAL ENCODER CONFIGURATION (CDAN 2025 Paper)
+# =============================================================================
+# Paper: "CLIP-driven attention network for multimodal sentiment analysis"
+# Journal: The Journal of Supercomputing, May 2025
+# Results: 78.5% accuracy on MVSA-Single
+#
+# Architecture: CLIP encoders + single-modality encoders (BERT + ResNet)
+# with attention-based fusion for each modality
+# =============================================================================
+use_dual_encoders: true  # ENABLED - use CLIP + BERT/ResNet dual encoders
+bert_model_name: bert-base-uncased  # BERT model for text auxiliary encoder
+bert_max_length: 128  # Maximum BERT sequence length
+resnet_model: resnet50  # ResNet model for image auxiliary encoder
+freeze_aux_encoders: true  # Freeze BERT/ResNet initially (like CLIP)
 
 # Data Augmentation Settings (DISABLED for now)
 augmentation:

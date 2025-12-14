@@ -26,7 +26,9 @@ class MVSADataset(Dataset):
         image_processor,
         label_map: Dict[str, int] = None,
         max_text_length: int = 77,
-        augment: bool = False
+        augment: bool = False,
+        bert_processor=None,
+        use_dual_encoders: bool = False
     ):
         """
         Initialize MVSA dataset.
@@ -39,6 +41,8 @@ class MVSADataset(Dataset):
             label_map: Mapping from label strings to integers
             max_text_length: Maximum text sequence length
             augment: Whether to apply data augmentation
+            bert_processor: BERT text processor for dual encoders (CDAN 2025)
+            use_dual_encoders: Whether to use dual encoders (CLIP + BERT/ResNet)
         """
         super().__init__()
 
@@ -48,6 +52,8 @@ class MVSADataset(Dataset):
         self.image_processor = image_processor
         self.max_text_length = max_text_length
         self.augment = augment
+        self.bert_processor = bert_processor
+        self.use_dual_encoders = use_dual_encoders
 
         # Default label mapping for sentiment analysis
         if label_map is None:
@@ -109,11 +115,13 @@ class MVSADataset(Dataset):
 
         Returns:
             dict with:
-                - input_ids: [seq_len] text token IDs
-                - attention_mask: [seq_len] text attention mask
+                - input_ids: [seq_len] CLIP text token IDs
+                - attention_mask: [seq_len] CLIP text attention mask
                 - pixel_values: [C, H, W] image pixels
                 - label: scalar label ID
                 - sample_id: string sample ID
+                - bert_input_ids: [seq_len] BERT token IDs (if dual encoders enabled)
+                - bert_attention_mask: [seq_len] BERT attention mask (if dual encoders enabled)
         """
         row = self.data.iloc[idx]
 
@@ -122,7 +130,7 @@ class MVSADataset(Dataset):
         if pd.isna(text):
             text = ""  # Handle missing text
 
-        # Process text
+        # Process text with CLIP tokenizer
         text_inputs = self.text_processor(text)
 
         # Load image
@@ -148,6 +156,12 @@ class MVSADataset(Dataset):
             'label': label,
             'sample_id': str(row['id'])
         }
+
+        # Add BERT tokenization for dual encoders (CDAN 2025)
+        if self.use_dual_encoders and self.bert_processor is not None:
+            bert_inputs = self.bert_processor(text)
+            sample['bert_input_ids'] = bert_inputs['bert_input_ids'].squeeze(0)
+            sample['bert_attention_mask'] = bert_inputs['bert_attention_mask'].squeeze(0)
 
         return sample
 
@@ -339,7 +353,7 @@ def collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     Returns:
         Batched tensors
     """
-    # Stack tensors
+    # Stack CLIP tensors
     input_ids = torch.stack([sample['input_ids'] for sample in batch])
     attention_mask = torch.stack([sample['attention_mask'] for sample in batch])
     pixel_values = torch.stack([sample['pixel_values'] for sample in batch])
@@ -357,5 +371,12 @@ def collate_fn(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     if 'label_dist' in batch[0]:
         label_dists = torch.stack([sample['label_dist'] for sample in batch])
         collated['label_dists'] = label_dists
+
+    # Handle BERT inputs for dual encoders (CDAN 2025)
+    if 'bert_input_ids' in batch[0]:
+        bert_input_ids = torch.stack([sample['bert_input_ids'] for sample in batch])
+        bert_attention_mask = torch.stack([sample['bert_attention_mask'] for sample in batch])
+        collated['bert_input_ids'] = bert_input_ids
+        collated['bert_attention_mask'] = bert_attention_mask
 
     return collated

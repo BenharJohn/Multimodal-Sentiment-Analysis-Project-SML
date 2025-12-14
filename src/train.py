@@ -293,6 +293,13 @@ def train_epoch(
         pixel_values = batch['pixel_values'].to(device)
         labels = batch['labels'].to(device)
 
+        # BERT inputs for dual encoders (CDAN 2025)
+        bert_input_ids = batch.get('bert_input_ids')
+        bert_attention_mask = batch.get('bert_attention_mask')
+        if bert_input_ids is not None:
+            bert_input_ids = bert_input_ids.to(device)
+            bert_attention_mask = bert_attention_mask.to(device)
+
         # Apply mixup if enabled
         if use_mixup and mixup_augmentation is not None:
             batch_dict = {
@@ -332,7 +339,9 @@ def train_epoch(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 pixel_values=pixel_values,
-                labels=labels
+                labels=labels,
+                bert_input_ids=bert_input_ids,
+                bert_attention_mask=bert_attention_mask
             )
 
             loss = outputs['loss']
@@ -421,12 +430,21 @@ def validate(model, dataloader, device, epoch, logger):
             pixel_values = batch['pixel_values'].to(device)
             labels = batch['labels'].to(device)
 
+            # BERT inputs for dual encoders (CDAN 2025)
+            bert_input_ids = batch.get('bert_input_ids')
+            bert_attention_mask = batch.get('bert_attention_mask')
+            if bert_input_ids is not None:
+                bert_input_ids = bert_input_ids.to(device)
+                bert_attention_mask = bert_attention_mask.to(device)
+
             # Forward
             outputs = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 pixel_values=pixel_values,
-                labels=labels
+                labels=labels,
+                bert_input_ids=bert_input_ids,
+                bert_attention_mask=bert_attention_mask
             )
 
             loss = outputs['loss']
@@ -589,6 +607,10 @@ def main():
     exp_logger.log(f"  - Data augmentation: {config.get('augment_train', False)}")
     exp_logger.log(f"  - Mixup: {use_mixup}")
     exp_logger.log(f"  - EMA: {config.get('use_ema', False)}")
+    exp_logger.log(f"  - Dual Encoders (CDAN 2025): {config.get('use_dual_encoders', False)}")
+    if config.get('use_dual_encoders', False):
+        exp_logger.log(f"    - BERT model: {config.get('bert_model_name', 'bert-base-uncased')}")
+        exp_logger.log(f"    - ResNet model: {config.get('resnet_model', 'resnet50')}")
 
     tracker = ProgressTracker()
     best_val_f1 = 0.0
