@@ -24,7 +24,7 @@ freeze_clip: true
 # Cross-Attention (PROVEN: 2 layers work well)
 cross_attn_layers: 2  # 2 layers is optimal - more causes overfitting
 cross_attn_heads: 8
-cross_attn_dropout: 0.1
+cross_attn_dropout: 0.2  # INCREASED from 0.1 to reduce overfitting
 cross_attn_ff_dim: 2048
 pool_method: mean  # 'mean', 'max', or 'cls'
 
@@ -41,7 +41,7 @@ aux_num_layers: 2
 
 # Classifier (PROVEN: these dimensions work)
 classifier_hidden_dims: [512, 256]  # Original proven dimensions
-classifier_dropout: 0.3
+classifier_dropout: 0.5  # INCREASED from 0.3 to reduce overfitting
 
 # Training
 epochs: 50
@@ -50,9 +50,9 @@ num_workers: 4
 pin_memory: true
 
 # Optimization (PROVEN: these rates work)
-lr: 0.001  # Original proven learning rate
+lr: 0.0005  # REDUCED from 0.001 to reduce overfitting
 clip_lr: 0.00001  # Original proven CLIP learning rate
-weight_decay: 0.01
+weight_decay: 0.05  # INCREASED from 0.01 for stronger regularization
 optimizer: adamw
 scheduler: cosine  # Simple cosine without warmup works fine
 gradient_clip: 1.0
@@ -61,10 +61,10 @@ gradient_clip: 1.0
 freeze_epochs: 3  # Original proven value
 warmup_epochs: 2  # Not used with cosine scheduler
 
-# Regularization (CONSERVATIVE)
-label_smoothing: 0.0  # DISABLED - can cause training instability
+# Regularization (ANTI-OVERFITTING)
+label_smoothing: 0.1  # ENABLED - helps prevent overconfident predictions
 use_soft_labels: false
-augment_train: false  # DISABLED - start without augmentation
+augment_train: true  # ENABLED - data augmentation for regularization
 
 # Focal Loss for Class Imbalance
 # Class distribution: Positive=5638, Negative=601, Neutral=4065
@@ -89,26 +89,26 @@ bert_max_length: 128  # Maximum BERT sequence length
 resnet_model: resnet50  # ResNet model for image auxiliary encoder
 freeze_aux_encoders: true  # Freeze BERT/ResNet initially (like CLIP)
 
-# Data Augmentation Settings (DISABLED for now)
+# Data Augmentation Settings (ENABLED to reduce overfitting)
 augmentation:
   image:
-    random_resized_crop: false
+    random_resized_crop: true  # ENABLED
     crop_scale: [0.8, 1.0]
-    horizontal_flip: false
+    horizontal_flip: true  # ENABLED
     flip_prob: 0.5
-    color_jitter: false
+    color_jitter: true  # ENABLED - mild color augmentation
     brightness: 0.2
     contrast: 0.2
     saturation: 0.2
     hue: 0.1
-    random_rotation: false
+    random_rotation: false  # Keep disabled - may hurt sentiment
     rotation_degrees: 15
-    gaussian_blur: false
+    gaussian_blur: false  # Keep disabled
     blur_prob: 0.1
   text:
-    random_word_dropout: false
+    random_word_dropout: true  # ENABLED - mild text augmentation
     dropout_prob: 0.1
-    random_word_swap: false
+    random_word_swap: false  # Keep disabled - may change meaning
     swap_prob: 0.1
 
 # Advanced Training (ALL DISABLED for stability)
@@ -119,9 +119,9 @@ gradient_accumulation_steps: 1
 use_ema: false  # DISABLED - not needed for this task
 ema_decay: 0.999
 
-# Early Stopping (enabled with longer patience)
-early_stopping: true  # ENABLED - but with longer patience
-patience: 15  # Wait 15 epochs without improvement
+# Early Stopping (enabled with shorter patience to prevent overfitting)
+early_stopping: true  # ENABLED
+patience: 10  # REDUCED from 15 - stop earlier when overfitting
 min_delta: 0.001
 
 # Checkpointing
