@@ -183,20 +183,20 @@ def parse_args():
     parser.add_argument('--dataset-type', type=str, default='single',
                         choices=['single', 'multiple'], help='MVSA dataset type')
 
-    # Training
-    parser.add_argument('--epochs', type=int, default=30,
+    # Training (defaults=None to use config file values)
+    parser.add_argument('--epochs', type=int, default=None,
                         help='Number of training epochs')
-    parser.add_argument('--batch-size', type=int, default=32,
+    parser.add_argument('--batch-size', type=int, default=None,
                         help='Batch size')
-    parser.add_argument('--lr', type=float, default=1e-3,
+    parser.add_argument('--lr', type=float, default=None,
                         help='Learning rate for head')
-    parser.add_argument('--clip-lr', type=float, default=1e-5,
+    parser.add_argument('--clip-lr', type=float, default=None,
                         help='Learning rate for CLIP encoders')
-    parser.add_argument('--weight-decay', type=float, default=0.01,
+    parser.add_argument('--weight-decay', type=float, default=None,
                         help='Weight decay')
-    parser.add_argument('--freeze-epochs', type=int, default=3,
+    parser.add_argument('--freeze-epochs', type=int, default=None,
                         help='Number of epochs to freeze CLIP')
-    parser.add_argument('--warmup-epochs', type=int, default=2,
+    parser.add_argument('--warmup-epochs', type=int, default=None,
                         help='Number of warmup epochs')
 
     # Model
@@ -210,7 +210,7 @@ def parse_args():
                         choices=['adam', 'adamw', 'sgd'], help='Optimizer')
     parser.add_argument('--scheduler', type=str, default='cosine',
                         choices=['cosine', 'plateau', 'step'], help='LR scheduler')
-    parser.add_argument('--gradient-clip', type=float, default=1.0,
+    parser.add_argument('--gradient-clip', type=float, default=None,
                         help='Gradient clipping norm')
 
     # Checkpointing
@@ -218,7 +218,7 @@ def parse_args():
                         help='Checkpoint directory')
     parser.add_argument('--resume', type=str, default=None,
                         help='Resume from checkpoint')
-    parser.add_argument('--save-freq', type=int, default=5,
+    parser.add_argument('--save-freq', type=int, default=None,
                         help='Checkpoint save frequency (epochs)')
 
     # Misc
