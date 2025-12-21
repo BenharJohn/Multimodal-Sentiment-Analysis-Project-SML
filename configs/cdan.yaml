@@ -24,7 +24,7 @@ freeze_clip: true
 # Cross-Attention (PROVEN: 2 layers work well)
 cross_attn_layers: 2  # 2 layers is optimal - more causes overfitting
 cross_attn_heads: 8
-cross_attn_dropout: 0.15  # BALANCED: between 0.1 (v1) and 0.2 (v2)
+cross_attn_dropout: 0.1  # REVERTED to v1 setting (best performance)
 cross_attn_ff_dim: 2048
 pool_method: mean  # 'mean', 'max', or 'cls'
 
@@ -41,7 +41,7 @@ aux_num_layers: 2
 
 # Classifier (PROVEN: these dimensions work)
 classifier_hidden_dims: [512, 256]  # Original proven dimensions
-classifier_dropout: 0.4  # BALANCED: between 0.3 (v1) and 0.5 (v2)
+classifier_dropout: 0.3  # REVERTED to v1 setting (best performance)
 
 # Training
 epochs: 50
@@ -49,10 +49,10 @@ batch_size: 32
 num_workers: 4
 pin_memory: true
 
-# Optimization (PROVEN: these rates work)
-lr: 0.0008  # BALANCED: between 0.001 (v1) and 0.0005 (v2)
-clip_lr: 0.00001  # Original proven CLIP learning rate
-weight_decay: 0.02  # BALANCED: between 0.01 (v1) and 0.05 (v2)
+# Optimization (RESEARCH-BACKED: smaller LR for CLIP fine-tuning)
+lr: 0.001  # REVERTED to v1 setting (best performance)
+clip_lr: 0.00002  # RESEARCH: 2e-5 to 3e-5 optimal for CLIP fine-tuning
+weight_decay: 0.01  # REVERTED to v1 setting
 optimizer: adamw
 scheduler: cosine  # Simple cosine without warmup works fine
 gradient_clip: 1.0
@@ -61,10 +61,10 @@ gradient_clip: 1.0
 freeze_epochs: 3  # Original proven value
 warmup_epochs: 2  # Not used with cosine scheduler
 
-# Regularization (BALANCED)
-label_smoothing: 0.05  # BALANCED: mild smoothing (between 0.0 and 0.1)
+# Regularization (REVERTED to v1 + EMA from research)
+label_smoothing: 0.0  # REVERTED to v1 - research shows it can hurt if not tuned
 use_soft_labels: false
-augment_train: true  # Keep augmentation but lighter settings
+augment_train: false  # REVERTED to v1 - our augmentation hurt performance
 
 # Focal Loss for Class Imbalance
 # Class distribution: Positive=5638, Negative=601, Neutral=4065
@@ -111,17 +111,17 @@ augmentation:
     random_word_swap: false  # Keep disabled - may change meaning
     swap_prob: 0.1
 
-# Advanced Training (ALL DISABLED for stability)
+# Advanced Training
 use_mixup: false  # DISABLED - causes instability
 mixup_alpha: 0.2
 use_gradient_accumulation: false
 gradient_accumulation_steps: 1
-use_ema: false  # DISABLED - not needed for this task
-ema_decay: 0.999
+use_ema: true  # ENABLED - RESEARCH: EMA reduces overfitting when fine-tuning pretrained models
+ema_decay: 0.999  # Standard EMA decay rate
 
 # Early Stopping
 early_stopping: true  # ENABLED
-patience: 12  # BALANCED: between 10 (v2) and 15 (v1)
+patience: 15  # REVERTED to v1 setting
 min_delta: 0.001
 
 # Checkpointing
