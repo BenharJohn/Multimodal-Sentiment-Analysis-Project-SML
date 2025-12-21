@@ -24,7 +24,7 @@ freeze_clip: true
 # Cross-Attention (PROVEN: 2 layers work well)
 cross_attn_layers: 2  # 2 layers is optimal - more causes overfitting
 cross_attn_heads: 8
-cross_attn_dropout: 0.1  # REVERTED to v1 setting (best performance)
+cross_attn_dropout: 0.15  # SLIGHTLY INCREASED: Better regularization for fusion layers
 cross_attn_ff_dim: 2048
 pool_method: mean  # 'mean', 'max', or 'cls'
 
@@ -41,24 +41,24 @@ aux_num_layers: 2
 
 # Classifier (PROVEN: these dimensions work)
 classifier_hidden_dims: [512, 256]  # Original proven dimensions
-classifier_dropout: 0.3  # REVERTED to v1 setting (best performance)
+classifier_dropout: 0.4  # INCREASED: Stronger dropout to reduce overfitting
 
 # Training
-epochs: 50
+epochs: 60  # INCREASED: Allow more training time with early stopping
 batch_size: 32
 num_workers: 4
 pin_memory: true
 
-# Optimization (RESEARCH-BACKED: smaller LR for CLIP fine-tuning)
-lr: 0.001  # REVERTED to v1 setting (best performance)
-clip_lr: 0.00002  # RESEARCH: 2e-5 to 3e-5 optimal for CLIP fine-tuning
-weight_decay: 0.01  # REVERTED to v1 setting
+# Optimization (TUNED: stronger regularization to combat overfitting)
+lr: 0.0005  # REDUCED: Slower learning for better generalization
+clip_lr: 0.00001  # REDUCED: Even more conservative CLIP fine-tuning
+weight_decay: 0.03  # INCREASED: Stronger L2 regularization
 optimizer: adamw
 scheduler: cosine  # Simple cosine without warmup works fine
 gradient_clip: 1.0
 
 # CLIP Freezing Schedule
-freeze_epochs: 3  # Original proven value
+freeze_epochs: 5  # INCREASED: Let fusion layers learn before unfreezing CLIP
 warmup_epochs: 2  # Not used with cosine scheduler
 
 # Regularization (REVERTED to v1 + EMA from research)
@@ -122,7 +122,7 @@ ema_decay: 0.999  # Standard EMA decay rate
 
 # Early Stopping
 early_stopping: true  # ENABLED
-patience: 15  # REVERTED to v1 setting
+patience: 20  # INCREASED: Allow more exploration before stopping
 min_delta: 0.001
 
 # Checkpointing
