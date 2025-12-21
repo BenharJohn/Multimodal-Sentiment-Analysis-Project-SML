@@ -88,6 +88,7 @@ bert_model_name: bert-base-uncased  # BERT model for text auxiliary encoder
 bert_max_length: 128  # Maximum BERT sequence length
 resnet_model: resnet50  # ResNet model for image auxiliary encoder
 freeze_aux_encoders: true  # Freeze BERT/ResNet initially (like CLIP)
+use_decoder_feedback: true  # CDAN 2025: Feed decoder output back into fusion via self-adaptive aggregation
 
 # Data Augmentation Settings (LIGHT augmentation only)
 augmentation:

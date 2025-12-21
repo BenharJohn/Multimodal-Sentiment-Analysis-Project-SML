@@ -21,7 +21,7 @@ from models.classifier import MLPClassifier
 from models.losses import FocalLoss
 from models.bert_encoder import BERTTextEncoder
 from models.resnet_encoder import ResNetImageEncoder
-from models.multi_encoder_fusion import AttentionEncoderFusion
+from models.multi_encoder_fusion import AttentionEncoderFusion, SelfAdaptiveAggregation
 
 
 class CDANModel(nn.Module):
@@ -77,6 +77,9 @@ class CDANModel(nn.Module):
         bert_model_name: str = "bert-base-uncased",
         resnet_model: str = "resnet50",
         freeze_aux_encoders: bool = True,
+
+        # Self-adaptive aggregation (CDAN 2025 key innovation)
+        use_decoder_feedback: bool = True,  # Feed decoder output back into fusion
     ):
         """
         Initialize CDAN model.
@@ -106,6 +109,7 @@ class CDANModel(nn.Module):
             bert_model_name: BERT model name for text auxiliary encoder
             resnet_model: ResNet model name for image auxiliary encoder
             freeze_aux_encoders: Whether to freeze auxiliary encoders initially
+            use_decoder_feedback: Whether to use decoder output in final fusion (CDAN 2025)
         """
         super().__init__()
 
@@ -117,6 +121,7 @@ class CDANModel(nn.Module):
         self.label_smoothing = label_smoothing
         self.use_focal_loss = use_focal_loss
         self.use_dual_encoders = use_dual_encoders
+        self.use_decoder_feedback = use_decoder_feedback and use_aux_decoder  # Requires aux decoder
 
         # Initialize loss function
         if use_focal_loss:
@@ -241,6 +246,19 @@ class CDANModel(nn.Module):
                 loss_type=aux_loss_type
             )
 
+        # Self-Adaptive Aggregation (CDAN 2025 key innovation)
+        # Feeds decoder output back into fusion for refined representations
+        if self.use_decoder_feedback:
+            # Aggregate: [text_fused, image_fused, text_reconstructed, image_reconstructed]
+            # All are projection_dim (512)
+            self.adaptive_aggregation = SelfAdaptiveAggregation(
+                input_dims=[self.projection_dim] * 4,  # 4 streams of 512 each
+                output_dim=self.hidden_dim * 2,  # Match fusion_dim
+                dropout=cross_attn_dropout
+            )
+            # Override fusion_dim when using decoder feedback
+            self.fusion_dim = self.hidden_dim * 2
+
         # Classifier
         if classifier_hidden_dims is None:
             classifier_hidden_dims = [512, 256]
@@ -351,12 +369,39 @@ class CDANModel(nn.Module):
         # Modality gating (optional)
         if self.use_gating:
             gate_output = self.gate(text_fused, image_fused)
-            fused_features = gate_output['gated_features']  # [B, D*2]
+            gated_features = gate_output['gated_features']  # [B, D*2]
             gate_weights = gate_output['gate_weights']      # [B, 2]
         else:
             # Simple concatenation
-            fused_features = torch.cat([text_fused, image_fused], dim=-1)
+            gated_features = torch.cat([text_fused, image_fused], dim=-1)
             gate_weights = None
+
+        # Self-Adaptive Aggregation with decoder feedback (CDAN 2025)
+        # Feed decoder reconstructions back into fusion for refined representations
+        aux_loss = None
+        adaptive_weights = None
+        if self.use_decoder_feedback:
+            # Run auxiliary decoder to get reconstructed features
+            aux_output = self.aux_decoder(
+                text_fused=text_fused,
+                image_fused=image_fused,
+                text_target=text_pooled.detach() if labels is not None else None,
+                image_target=vision_pooled.detach() if labels is not None else None
+            )
+            text_reconstructed = aux_output['text_reconstructed']    # [B, 512]
+            image_reconstructed = aux_output['image_reconstructed']  # [B, 512]
+
+            # Store aux loss for later
+            if 'total_loss' in aux_output:
+                aux_loss = aux_output['total_loss']
+
+            # Self-adaptive aggregation: combine original + reconstructed features
+            # The model learns optimal weights for each feature stream
+            fused_features, adaptive_weights = self.adaptive_aggregation(
+                text_fused, image_fused, text_reconstructed, image_reconstructed
+            )
+        else:
+            fused_features = gated_features
 
         # Classification
         logits = self.classifier(fused_features)  # [B, num_classes]
@@ -371,6 +416,9 @@ class CDANModel(nn.Module):
 
         if gate_weights is not None:
             output['gate_weights'] = gate_weights
+
+        if adaptive_weights is not None:
+            output['adaptive_weights'] = adaptive_weights
 
         if return_attention:
             output['attention_weights'] = cross_attn_output['attention_weights']
@@ -394,17 +442,23 @@ class CDANModel(nn.Module):
 
             # Auxiliary reconstruction loss
             if self.use_aux_decoder:
-                aux_output = self.aux_decoder(
-                    text_fused=text_fused,
-                    image_fused=image_fused,
-                    text_target=text_pooled.detach(),  # Detach to avoid backprop through CLIP
-                    image_target=vision_pooled.detach()
-                )
+                if aux_loss is None:
+                    # Decoder not yet run (use_decoder_feedback=False but use_aux_decoder=True)
+                    aux_output = self.aux_decoder(
+                        text_fused=text_fused,
+                        image_fused=image_fused,
+                        text_target=text_pooled.detach(),
+                        image_target=vision_pooled.detach()
+                    )
+                    aux_loss = aux_output['total_loss']
+                    output['text_aux_loss'] = aux_output['text_loss']
+                    output['image_aux_loss'] = aux_output['image_loss']
+                else:
+                    # Already computed during decoder feedback
+                    output['text_aux_loss'] = aux_output.get('text_loss', aux_loss / 2)
+                    output['image_aux_loss'] = aux_output.get('image_loss', aux_loss / 2)
 
-                aux_loss = aux_output['total_loss']
                 output['aux_loss'] = aux_loss
-                output['text_aux_loss'] = aux_output['text_loss']
-                output['image_aux_loss'] = aux_output['image_loss']
 
                 # Add weighted auxiliary loss to total
                 total_loss = total_loss + self.aux_loss_weight * aux_loss
@@ -515,5 +569,7 @@ def build_cdan_model(config: dict) -> CDANModel:
         use_dual_encoders=config.get('use_dual_encoders', False),
         bert_model_name=config.get('bert_model_name', 'bert-base-uncased'),
         resnet_model=config.get('resnet_model', 'resnet50'),
-        freeze_aux_encoders=config.get('freeze_aux_encoders', True)
+        freeze_aux_encoders=config.get('freeze_aux_encoders', True),
+        # Self-adaptive aggregation (CDAN 2025 key innovation)
+        use_decoder_feedback=config.get('use_decoder_feedback', True)
     )
